@@ -1,0 +1,918 @@
+---
+title: "Predicting the Percentage of Agricultural Land in 2016 for Different Countries"
+author: "Catherine Al Aswad (305541)"
+date: " Last Updated 12/18/2020"
+output:
+  html_document:
+    fig_caption: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 2
+    df_print: kable
+    toc_float:
+      collapsed: no
+---
+
+```{r, include=FALSE}
+# Do not edit this code block/chunk
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning = FALSE, fig.width = 16/2.5, fig.height = 9/2.5)
+```
+
+
+```{r Packages}
+# Load all necessary packages here:
+library(tidyverse) 
+library(janitor)
+library(moderndive)
+library(here)
+library(knitr)
+library(MASS)    #for box-cox
+library(car)    #for vif and qqplot() and 3d graphs and anova type 2
+library(plotly)   # for interactive graphs
+library(splines)
+library(kableExtra)
+library(moments)         # for skewness and kurtosis
+
+```
+
+```{r Wrangling}
+# data wrangling code:
+#reading in the code
+agricultural_land_p <- read_csv(here("agricultural land.csv"))
+forest_area_p <- read_csv(here("forest area.csv"))
+
+population_growth_p <- read_csv(here("population growth.csv"))
+aded_val_GDP <- read_csv(here("ag added value to GDP.csv"))
+perm_cropLand_p <- read_csv(here("Permanent cropland (% of land area).csv"))
+
+# For the wrangling, I selected the columns I wanted from each dataset, rather than using the pivot_longer function on the years, since I only needed 2 columns
+
+# Agricultural land (% of land area)	
+agricultural_land_p_t <- agricultural_land_p %>%
+    dplyr::select(c("Country Name" ,"2016 [YR2016]")) 
+colnames(agricultural_land_p_t) <- c("Country", "agricultural_land_p_2016")
+levels(agricultural_land_p_t$agricultural_land_p_2016)[levels(agricultural_land_p_t$agricultural_land_p_2016)==".."] = NA
+
+agricultural_land_p_t <- agricultural_land_p_t %>%
+   mutate(Country = as.factor(Country),
+          agricultural_land_p_2016 = as.double(agricultural_land_p_2016))       
+
+
+
+# Forest area (% of land area)	
+forest_area_p_t <- forest_area_p %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(forest_area_p_t) <- c("Country", "forest_area_p_2015")
+levels(forest_area_p_t$forest_area_p_2015)[levels(forest_area_p_t$forest_area_p_2015)==".."] = NA
+
+forest_area_p_t <- forest_area_p_t %>%
+   mutate(Country = as.factor(Country),
+          forest_area_p_2015 = as.double(forest_area_p_2015)) 
+
+
+
+# Population growth (annual %)	
+population_growth_p_t <- population_growth_p %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(population_growth_p_t) <- c("Country", "population_growth_p_2015")
+levels(population_growth_p_t$population_growth_p_2015)[levels(population_growth_p_t$population_growth_p_2015)==".."] = NA
+
+population_growth_p_t <- population_growth_p_t %>%
+   mutate(Country = as.factor(Country),
+          population_growth_p_2015 = as.double(population_growth_p_2015)) 
+
+
+# Agriculture, forestry, and fishing, value added (% of GDP)	
+aded_val_GDP_t <- aded_val_GDP %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(aded_val_GDP_t) <- c("Country", "aded_val_GDP_2015")
+levels(aded_val_GDP_t$aded_val_GDP_2015)[levels(aded_val_GDP_t$aded_val_GDP_2015)==".."] = NA
+
+aded_val_GDP_t <- aded_val_GDP_t %>%
+   mutate(Country = as.factor(Country),
+          aded_val_GDP_2015 = as.double(aded_val_GDP_2015)) 
+
+
+
+# Permanent cropland (% of land area)
+perm_cropLand_p_t <- perm_cropLand_p %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(perm_cropLand_p_t) <- c("Country", "perm_cropLand_p_2015")
+levels(perm_cropLand_p_t$perm_cropLand_p_2015)[levels(perm_cropLand_p_t$perm_cropLand_p_2015)==".."] = NA
+
+perm_cropLand_p_t <- perm_cropLand_p_t %>%
+   mutate(Country = as.factor(Country),
+          perm_cropLand_p_2015 = as.double(perm_cropLand_p_2015)) 
+
+
+# tidy final dataset 
+tidy_joined_dataset <-  agricultural_land_p_t %>%
+    inner_join(forest_area_p_t, by = c ("Country")) %>%
+    inner_join(population_growth_p_t, by = c ("Country")) %>%
+    inner_join(aded_val_GDP_t, by = c ("Country"))    %>%
+    inner_join(perm_cropLand_p_t, by = c ("Country"))    %>%
+    na.omit()
+
+
+```
+
+
+***
+
+
+# I. Introduction
+
+***
+
+ 
+While the world population grows, it is important to insure there is enough agricultural land to provide food for the growing population. The goal of this study is to predict the percent of land in a country designated for agricultural purposes in 2016, using data from 2015.
+ 
+The data used in this study is obtained from the World Bank Data sets^[“Indicators”. _The World Bank - Data_. Accessed December 2020. https://data.worldbank.org/indicator]. The ‘Agricultural land (% of land area)’ indicator is the continuous response variable in the study, which accounts for arable land, permanent crops land, and land under permanent pastures^[“AG.LND.AGRI.K2”. Metadata Glossary, _Data Bank_. Accessed December 2020. https://databank.worldbank.org/metadataglossary/world-development-indicators/series/AG.LND.AGRI.K2#:~:text=Agricultural%20land%20refers%20to%20the,crops%2C%20and%20under%20permanent%20pastures.]. The 2016 country data is used for the response variable, since this is the most recent data available for this indicator. 
+
+The ‘Permanent cropland (% of land area)’ indicator is used as one of the predictor variables, which is land used for crops that last for many seasons, making replanting not necessary. This variable may seem to be unsuitable to predict the % of agricultural land in a country, since the former  is used in calculating the latter. However, this issue is not present in this study, since data from 2015 is used to predict data in 2016: the % of permanent cropland in 2015 cannot be highly correlated with the % of agricultural land in 2016, since 2015 permanent cropland percentage is not used to calculate the 2016 agricultural land percentage. This report does not study a casual relationship with the stated response variable in 2016 and the % permanent cropland in 2015, because there is no such relationship: a change in the amount of agricultural land used for permanent crops does not necessarily cause a change in the amount of land used for agricultural purposes. The study considers a linear relationship between the response variable and this predictor, since the % of agricultural land is assumed to increase in an almost linear fashion, as the % of permanent cropland of a country’s land area increases. 
+
+The ‘Population growth (annual %)’ indicator for 2015 is used as another predictor variable, where the population refers to the population of people residing in the country, regardless of legal status or citizenship^[“Population Growth (Annual %)”. Data Catalog, _The World Bank_. Accessed December 2020. https://datacatalog.worldbank.org/population-growth-annual]. This variable is used since there is a relationship between the response variable and this predictor: large population growth means more people need food. However, there is no causal relationship between the response variable and this predictor variable, since population growth can lead to the importation of more food, rather than the expansion of agricultural land. A non-linear relationship will be explored between this predictor and the response variable, since no evidence was found to support a linear relationship.
+
+The ‘Forest area (% of land area)’ indicator for 2015 is another predictor variable, which includes land that has trees at least 5 meters tall, and excludes land with trees used in agricultural production systems, in parks, and in gardens^[“Forest Area (% of Land Area)”. Data Catalog, _The World Bank_. Accessed December 2020. https://datacatalog.worldbank.org/forest-area-land-area-3]. This variable was chosen because the expansion of agricultural land tends to happen at the expense of forest land. However, there is no causal relationship, since a decrease in forest land does not necessarily mean the lost land is used for agricultural purposes; the land may have been used for new buildings. A non-linear relationship will be explored between this predictor and the response variable,  since no evidence was found to support a linear relationship.
+ 
+The ‘Agriculture, forestry, and fishing, value added (% of GDP)’ in 2015 indicator is the final predictor variable, where the value added is the net output from the agriculture, forestry, and fishing sectors^[“Agriculture, forestry, and fishing, value added (% of GDP)”. Data Catalog, _The World Bank_. Accessed December 2020. https://datacatalog.worldbank.org/agriculture-forestry-and-fishing-value-added-gdp-0]. This variable is included in the study, since the decision of land designated for agricultural purposes can be influenced by the added value to the country’s GDP. Hence, a relationship between this predictor and the response variable exists, but the relationship is not causal, since no evidence was found to support this assumption. However, the nature of this relationship is unknown, so a nonlinear relationship will be considered. 
+ 
+Only the four stated predictor variables will be used in predicting the % of agricultural land of a country in 2016. The other present indicators that are related to agricultural land are after-effects of expanded agricultural land, rather than factors related to the increase in agricultural land. For example, the ‘Fertilizer consumption’ indicator. Additionally, other present variables that may seem adequate, such as the ‘Arable land ( % of land area)’ indicator, have been excluded due to their similarity to the ‘Permanent cropland (% of land area)’ indicator, in order to avoid potential correlation issues. These four predictor variables are assumed to be enough to make an adequate prediction model with nonlinear terms, without overfitting the data, which is later checked in the study.
+ 
+After organizing the data and removing countries with missing values, 225 observations remain out of the original 269 observations (about 83.6%). The sample does not have a weighted design, so no survey design will be applied. 
+
+
+
+```{r sample_table}
+
+sample <- tidy_joined_dataset %>% 
+  sample_n(5)
+
+sample[,1:4] %>%
+  kable(caption = "Table 1.Sample for 5 randomly chosen countries of the data set used in this study") %>%
+  kable_styling(full_width = F)
+
+
+
+sample[,c(1,5:6)] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+ # filtered  <- tidy_joined_dataset %>%
+ #      dplyr::select(-"Country")
+ # cor(filtered)
+
+
+```
+
+# II. Exploratory data analysis
+
+***
+
+With a total sample size of 225 observations, we see the mean and median for the % of agricultural land in a country to be very close, as seen in table 2. This indicates the presence of an approximately normal distribution for the % of agricultural land in a country in 2016, as reaffirmed in figure 1. 
+
+```{r summary_table}
+tidy_joined_dataset %>% 
+  summarize(n = n(), 
+            min = min(agricultural_land_p_2016 , na.rm = T), 
+            median = median(agricultural_land_p_2016 , na.rm = T), 
+            mean = mean(agricultural_land_p_2016 , na.rm = T), 
+            max = max(agricultural_land_p_2016 , na.rm = T),
+            sd = sd(agricultural_land_p_2016 , na.rm = T))  %>%
+  kable(caption = "Table 2: Summary for the percent of agricultural land in different countries, in 2016") %>%
+  kable_styling(full_width = F)
+
+```
+
+
+
+```{r   D_CCPTTH, fig.cap = "Figure 1. Distribution for the percent of agricultural land in different countries, in 2016", fig.align = "center"}
+
+ggplot(tidy_joined_dataset,  aes(x= agricultural_land_p_2016)) +
+  geom_histogram(bins = 20, fill = "#40E850", color = "#6109de", alpha = 0.7) +
+  labs(x = "% agricultural land in different countries, 2016") +
+    theme_bw()
+
+
+```
+
+In figures 2 and 3, we see that the distributions for the % of permanent cropland in a country in 2015 and for the % of forest area in a country in 2015 are right skewed, where the former is heavily right skewed. Figure 2 shows that most of the countries have 0% to 10% of their land designated for permanent crops. Figure 4 reaffirms this observation, and shows that the % of permanent cropland never exceeds the % of agricultural land. This shows that the 4 to 5 outliers with more than 25% of land for permanent crops are most likely not measurement errors. We see some curvature using the blue loess curve between 10 to 40% permanent cropland. However, there are very few points in that area, so fitting a flexible model in that area may result in overfitting. Additionally, there seems to be a positive correlation between the % of permanent cropland in 2015 and the % of agricultural land in 2016, since as the former increases, the latter tends to increase. The correlation coefficient was found to be 0.18, which is small, and reaffirms the absence of strong correlation between the % of permanent cropland in 2015 and the % of agricultural land in 2016, mentioned in the introduction.
+
+```{r   D_SI, fig.show="hold", out.width="50%"}
+
+ggplot(tidy_joined_dataset, aes(x= perm_cropLand_p_2015)) +
+  geom_histogram(bins = 20, fill = "#40E850", color = "#6109de", alpha = 0.7) +
+    labs(x = "% Permanent Crop Land of a country's land area, in 2015", caption = "Figure 2. Distribution for the Permanent Crop Land (% of land area) in 2015") +
+    theme_bw()+
+  theme(plot.caption = element_text(size = 13))
+
+ggplot(tidy_joined_dataset, aes(x= forest_area_p_2015)) +
+  geom_histogram(bins = 20, fill = "#40E850", color = "#6109de", alpha = 0.7) +
+  labs(x = "% Forest Area of a country's land, in 2015", caption = "Figure 3. Distribution for the % of forest area in different countries, in 2015" ) +
+    theme_bw() +
+  theme(plot.caption = element_text(size = 13))
+
+
+```
+
+```{r   SC_SI, fig.cap = "Figure 4. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their 2015 Permanent Crop Land (% of land area). The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= perm_cropLand_p_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#338C3B") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% Permanent Crop Land of country land area, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA,
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESI, fig.cap = "Figure 3. Distribution for the percent of forest area in different countries, in 2015", fig.align = "center", include = FALSE}
+
+ggplot(tidy_joined_dataset, aes(x= forest_area_p_2015)) +
+  geom_histogram(bins = 20, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "% Forest Area of a country's land, in 2015", caption = "Figure 3. Distribution for the % of forest area in different countries, in 2015" ) +
+    theme_bw()
+
+
+```
+
+In figure 5, we see a negative moderate correlation between the % of forest area in 2015 and % of agricultural land in 2016. The correlation coefficient is about -0.44, which backs up the previous observation. The negative relationship shows that a large % of forest area tends to indicate that there is not a lot of agricultural land, and vice versa. There is an indication of nonlinearity between 0 to 25% of forest area. 
+ 
+
+```{r   SC_SIkl, fig.cap = "Figure 5. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent of forest area, in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= forest_area_p_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#338C3B") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% Forest Area, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+Figure 6 shows the % of the 2015 population growth to be approximately normally distributed, with some slight right skewness. The scatter plot in figure 8 shows little to no correlation with the % of agricultural land in 2016, with some potential outliers on either side of the plot. However, the loess curve shows some correlation at different sections in the 2015 % population growth range. By exploring the nonlinear relationship between the  % of the 2015 population growth and the % of agricultural land in 2016, the influence of the outliers should be reduced.
+
+Figure 7 shows a heavily right skewed distribution for the % added value of agriculture, forestry, and fishing to a country’s GDP in 2015. In figure 9, we see that this predictor has a noticeable positive correlation with the % of agricultural land in 2016. However, this relationship may be largely influenced by the three possible outliers with an added value greater than 40% . The loess smooth curve shows that this positive relationship is more apparent before 20% added value, after which there is not much correlation. This shows that when the % added value is low, a country tends to increase the amount of land designated for agriculture, but once a certain amount of added value is attained, the agricultural land is not significantly expanded.
+
+
+
+```{r   D_ESIa, fig.show="hold", out.width="50%"}
+
+ggplot(tidy_joined_dataset, aes(x= population_growth_p_2015)) +
+  geom_histogram(bins = 25, fill = "#40E850", color = "#6109de", alpha = 0.7) +
+  labs(x = "% annual population growth in 2015", caption = "Figure 6. Distribution for the % annual population growth for different countries in 2015.") +
+    theme_bw() +
+  theme(plot.caption = element_text(size = 13))
+
+
+ggplot(tidy_joined_dataset, aes(x= aded_val_GDP_2015)) +
+  geom_histogram(fill = "#40E850", color = "#6109de", alpha = 0.7) +
+  labs(x = "% Added value of Agriculture, forestry, and fishing to GDP, 2015", caption = "Figure 7. Distribution for the 2015 % added value of agriculture, forestry, \n and fishing to the GDP of different countries") +
+    theme_bw() +
+  theme(plot.caption = element_text(size = 13))
+
+
+```
+
+
+
+```{r   SC_SIzkl, fig.cap = "Figure 8. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent annual population growth in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= population_growth_p_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#338C3B") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% annual population growth in 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESIew, fig.cap = "Figure 3. Distribution for the % Added value of Agriculture, forestry, and fishing to the GDP of different countries, in 2015", fig.align = "center", include = FALSE}
+
+ggplot(tidy_joined_dataset, aes(x= aded_val_GDP_2015)) +
+  geom_histogram(fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "% Added value of Agriculture, forestry, and fishing to GDP, 2015", caption = "Figure 3. Distribution for the 2015 % added value of agriculture, forestry, \n and fishing to the GDP of different countries") +
+    theme_bw()
+
+
+
+```
+
+
+
+```{r   SC_SIkfl, fig.cap = "Figure 9. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against the % added value of Agriculture, forestry, and fishing to their GDP in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= aded_val_GDP_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#338C3B") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+***
+# III. Multiple linear regression
+
+## i. Methods
+***
+
+It was found in the exploratory analysis that the response variable, % of agricultural land in 2016, is approximately normally distributed. So, no transformation will be applied to the variable, since there are no extreme outliers whose affects need to be reduced.
+
+As decided at the beginning of the study, a linear relationship between the % of agricultural land in 2016 and the % of permanent crop land in 2015 will be considered, and a nonlinear one with the other predictors. To capture the nonlinear relationships, natural splines will be applied to each of the predictor variables: 2015 % population growth, 2015 % forest area, and 2015 % added value. Each spline will have 4 degrees of freedom (which corresponds to 5 knots), following the rule of thumb for a sample size greater than 100 observations. 
+
+The model is:
+```{r  primary_model}
+
+
+first_model = lm(agricultural_land_p_2016 ~  perm_cropLand_p_2015 + ns(population_growth_p_2015, df = 4) + ns(forest_area_p_2015, df = 4) + ns(aded_val_GDP_2015, df = 4) , data = tidy_joined_dataset)
+
+summary(first_model)$call
+
+
+```
+
+Using the model above, we get a normal QQ plot for the response variable in figure 10, which appears approximately straight, except for some slight trailing-off at the tails. Figure 11 shows the residuals of the model to have an approximately normal distribution. Figure 12 shows a cloud-shaped scatterplot for the residuals. In the latter graph, there appears to be possible outliers on the extreme right and left sides of the fitted values range. However, their influence does not seem to cause heteroscedasticity. 
+
+
+```{r qqplots ,fig.cap= "Figure 10. Normal Q-Qplot for the percent of agricultural land in different countries, in 2016", fig.align = "center"}
+
+qqnorm(tidy_joined_dataset$agricultural_land_p_2016, pch = 1, frame = TRUE) 
+qqline(tidy_joined_dataset$agricultural_land_p_2016, col = "#3080cf", lwd = 2)
+
+# # good, between -1 and 1,  0.06780285
+# skewness(tidy_joined_dataset$agricultural_land_p_2016)
+# # bad, greater than 1, but transformation did not work, 2.421388
+# kurtosis(tidy_joined_dataset$agricultural_land_p_2016)
+
+
+# # not needed
+# y_model = lm( agricultural_land_p_2016 ~ 1 , data = tidy_joined_dataset)
+# transformation_test = MASS::boxcox(y_model)
+# lambda = transformation_test$x[which(transformation_test$y == max(transformation_test$y))]
+# lambda
+
+```
+
+
+
+```{r rez_dis, fig.show="hold", out.width="50%" }
+
+regression_points <-  data.frame(resid(first_model))
+colnames(regression_points) <- "residuals"
+ggplot(regression_points, aes(x = residuals)) +
+  geom_histogram(bins = 20, colour="#3F7845", fill = "#3080cf", alpha = 0.4) +
+  labs(x = "Residuals", caption = "Figure 11. Residuals distribution for the statistical model") +
+  theme_bw() +
+  theme(plot.caption = element_text(size = 13))
+
+## not extreme skewness, between -1 and 1
+# skewness(regression_points$residuals)
+
+
+ggplot(tidy_joined_dataset, aes(x = predict(first_model), y = resid(first_model))) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", fill = "#3080cf", alpha = 0.2) +
+  labs(y = "Residuals", x = "Fitted Values", caption = "Figure 12. Residuals graph for the fitted values. \n Lowess curve in blue. \n Horizontal line at zero in red." ) +
+  theme_bw() +
+  theme(plot.caption = element_text(size = 13))
+
+```
+
+```{r rez_fv, fig.cap = "Figure 16. Residuals graph for the fitted values, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center", include = FALSE}
+
+ggplot(tidy_joined_dataset, aes(x = predict(first_model), y = resid(first_model))) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "Residuals", x = "Fitted Values", caption = "Figure 16. Residuals graph for the fitted values. \n Lowess curve in blue. \n Horizontal line at zero in red." ) +
+  theme_bw()
+
+```
+
+
+```{r rez_SI, fig.cap = "Figure 17. Residuals graph for the Permanent Crop Land (% of land area) for different countries, in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center", include = FALSE}
+
+ rstandard_val <- rstandard(first_model)
+
+ggplot(tidy_joined_dataset, aes(x = perm_cropLand_p_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% Permanent Crop Land of country land area, 2015") +
+  theme_bw()
+
+```
+
+```{r rez_EljSI, fig.cap = "Figure 18. Residuals graph for the percent of forest area in different countries, in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center", include = FALSE} 
+
+ggplot(tidy_joined_dataset, aes(x = forest_area_p_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% forest area") +
+  theme_bw()
+
+```
+
+```{r rez_EklSI, fig.cap = "Figure 18. Residuals graph for the percent annual population growth for different countries in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center", include = FALSE} 
+
+ggplot(tidy_joined_dataset, aes(x = population_growth_p_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% annual population growth, 2015") +
+  theme_bw()
+
+```
+
+```{r rez_ESjlI, fig.cap = "Figure 18. Residuals graph for the  % Added value of Agriculture, forestry, and fishing to the GDP of different countries, in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center", include = FALSE} 
+
+ggplot(tidy_joined_dataset, aes(x = aded_val_GDP_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+  theme_bw()
+
+```
+
+In table 3, we see that the GVIF value for the variables with 1 degree of freedom each, and the GVIF^(1/(2*Df)) value for the variables with more than 1 degree of freedom each are all between 1 and 5. This indicates that there is a moderate correlation between the predictor variables. Since there is not a lot of multicollinearity between the predictor variables, the statistical power of the model is not greatly reduced. 
+
+Additionally, table 3 shows that the model has a total of 13 degrees of freedom. For a study with a continuous response variable and a sample size of 225 observations, we have $\frac{225}{13}$ = 17.3  which is greater than 15 (as a rule of thumb). Thus, the model has a reasonable number of predictors for the given sample, which may reduce the risk of overfitting.
+ 
+Since the model met the assumptions of linear regression, we can proceed with the analysis.
+ 
+
+
+
+```{r   model_vifs}
+
+kable(car::vif(first_model),
+      caption = "Table 3: VIF table") %>%
+  kable_styling(full_width = F)
+
+
+```
+
+
+## ii. Model Results and Interpretation
+***
+
+The model is:
+```{r   transf_model_just}
+
+summary(first_model)$call
+
+```
+
+Due to using splines on the 2015 % population growth, 2015 % forest area, and 2015 % added value of agriculture, foresting, and fishing to a country’s GDP, their coefficients in table 4 cannot be interpreted. However, the p-values for the 4th level of the 2015 % population growth variable coefficient, the 2nd and 4th levels of the 2015 % forest area variable coefficients, and the 1st and 3rd levels of the 2015 % added value variable coefficients are less than 0.05. This means that the splines for the mentioned levels are helpful in our model for predicting the 2016 % of agricultural land in a country, while the other levels are not.
+
+As for the 2015 % of permanent crop land coefficient, for every additional percent of permanent crop land in 2015, the 2016 % of agricultural land in the country tends to increase by 0.4914, when all the other variables in the model (2015 % population growth, 2015 % forest area, and 2015 % added value) are held constant. The p-value for this coefficient is less than 0.05, making it significant in the model for predicting the 2016 % of agricultural land in a country.
+
+When a country has no population growth in 2015, no permanent cropland in 2015, no forest area in 2015, and no added value from agriculture, foresting, and fishing to the 2015 GDP of the country, then the country would have a mean of 24.1215% of their land designated to agriculture in 2016. The p-value for the intercept is less than 0.05, making it significant.
+
+
+```{r   transf_model_summary}
+
+kable(summary(first_model)$coefficients, 
+      digits = 4,
+      caption = "Table 4. Model Summary Table") %>%
+  kable_styling(full_width = F)
+
+
+```
+
+
+The model explains a good amount of variability (about 42.4%) of the 2016 % of agricultural land in a country, given by the R-squared below. With a very small p-value (<< 0.05) for the F-statistic of the model, we conclude that the previously stated model is an adequate model for predicting the 2016 % of agricultural land in a country.
+
+
+```{r   transf_model_summary_overall}
+
+#Residual Standard error (Like Standard Deviation)
+RSE <- summary(first_model)$sigma #Residual Standard Error
+RSE_df <- summary(first_model)$df[2] #Residual Standard Error df
+MR_2 <- summary(first_model)$r.squared #Multiple R-squared
+AR_2 <- summary(first_model)$adj.r.squared # adjusted R-squared
+FS <- summary(first_model)$fstatistic[1]   # f-statistic
+fs_n <- summary(first_model)$fstatistic[2]   # f-statistic numerator df
+fs_d <- summary(first_model)$fstatistic[3]   # f-statistic denominator df
+fs_p <- pf(summary(first_model)$fstatistic[1],summary(first_model)$fstatistic[2],summary(first_model)$fstatistic[3],lower.tail=FALSE)
+
+new_summary_1 <- data.frame() %>% 
+  rbind(list("Residual Standard Error", RSE, RSE_df),
+      list("Multiple R-squared", MR_2, ""),
+      list("Adjusted R-squared", AR_2, "")) %>%
+kable(format = "html", 
+      digits = 3, 
+      table.attr = "style='width:30%;'", 
+      col.names = c("", "Value", "df"),
+      row.names = FALSE) %>%
+  kable_styling(full_width = F)
+
+
+new_summary_2 <- data.frame() %>% 
+  rbind(list("Model F-statistic", FS, fs_n, fs_d),
+      list("P-value", fs_p, "", "")) %>%
+  mutate_if(is.numeric, funs(as.character(signif(., 4)))) %>%
+kable(format = "html", 
+      digits = 3, 
+      table.attr = "style='width:80%;'",
+      col.names = c("", "Value", "Numerator df", "Denominator df"),
+      row.names = FALSE) %>%
+  kable_styling(full_width = F)
+
+new_summary_1
+new_summary_2
+
+```
+
+***
+## iii. Inference for multiple regression
+
+
+Looking at the type II sums of squares in table 5, we see that the 2015 % permanent cropland explains a significant amount of variation in the 2016 % of agricultural land in a country, when the splines of the other 3 predictors are already in the model, since it has a p-value less than 0.05.
+
+The spline for the 2015 % population growth variable explains a significant amount of variation in the 2016 % of agricultural land in a country, when the 2015 % permanent cropland variable, the spline for the 2015 % forest area variable, and the spline for the 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variable are already in the model, since it has a p-value less than 0.05.
+
+The spline for the 2015 % forest area variable explains a significant amount of variation in the 2016 % of agricultural land in a country, when the 2015 % permanent cropland variable, the spline for the 2015 % population growth variable, and the spline for the 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variable are already in the model, since it has a p-value less than 0.05.
+
+The spline for the 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variable explains a significant amount of variation in the 2016 % of agricultural land in a country, when the 2015 % permanent cropland variable, the spline for the 2015 % population growth variable, and the spline for the 2015 % forest area variable  are already in the model, since it has a p-value less than 0.05.
+
+```{r   transf_anova_table}
+ kable(Anova(first_model, type = "II"), 
+       digits = 4,
+       caption = "Table 5. ANOVA (Type II tests) Table") %>%
+  kable_styling(full_width = F)
+
+
+ # Anova(first_model, type = "II")
+ # anova(first_model)
+
+```
+
+
+When the 2015 % population growth, 2015 % forest area, and 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variables are constant (equal to the values in the figure 13 caption), we see that the blue 95% confidence intervals for the 2016 % of agricultural land in a country are narrow at 0%  permanent cropland in 2015 and get wider after 20%. This shows that there is more accuracy in the area with more points, and less accuracy in the area with less points that may be influential outliers. The pink 95% prediction intervals are all greater than zero, but the ones before the 20% permanent cropland in 2015 are slightly narrower than those after the 20% mark.
+
+
+```{r  spline_model_1, fig.cap =  "Figure 13. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their 2015 Permanent Crop Land (% of land area), where the forest area percentage of a country's land in 2015 euqals its median = 31.88387, for a median percent population growth in a country in 2015 = 1.256186, and for a median % added value of agriculture, forestry, and fishing to the GDP of a country = 7.408892. The blue line is the linear curve, with its associated 95% CI and wider pink 95% PI.", fig.align = "center"}
+
+
+filtered  <- tidy_joined_dataset %>%
+     dplyr::select(- "Country")
+
+
+
+fa_m <- tidy_joined_dataset %>% 
+  summarize(median = median(forest_area_p_2015 , na.rm = T))     # 31.88387
+pg_m <- tidy_joined_dataset %>% 
+  summarize(median = median(population_growth_p_2015 , na.rm = T))    # 1.256186
+ag_gdp_m <- tidy_joined_dataset %>% 
+  summarize(median = median(aded_val_GDP_2015 , na.rm = T))   # 7.408892
+pcl_m <- tidy_joined_dataset %>% 
+  summarize(median = median(perm_cropLand_p_2015 , na.rm = T))   # 1.311853
+
+
+
+# Get min/max values of pcl using the range() function
+pcl_lims = filtered %>%
+    select(perm_cropLand_p_2015) %>%
+    range
+
+# Generate a sequence of pcl values spanning the range
+pcl_grid = seq(from = min(pcl_lims), to = max(pcl_lims))
+
+
+# Predictions
+pred = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = pcl_grid),
+               interval="prediction",
+               level=.95)
+
+pred_2 = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = pcl_grid),
+               interval="confidence",
+               level=.95)
+
+
+p_6 <- ggplot() +
+  geom_point(data = tidy_joined_dataset, aes(x = perm_cropLand_p_2015, y = agricultural_land_p_2016,label = Country ), alpha = 0.4, color = "#23650F") +
+  geom_line(aes(x = pcl_grid, y = pred[,"fit"]), color = "#3080cf") +
+  geom_ribbon(aes(x = pcl_grid,
+                  ymin = pred[,"lwr"], 
+                  ymax = pred[,"upr"]),
+              alpha = 0.1,
+              fill = "red") +
+  geom_ribbon(aes(x = pcl_grid,
+                  ymin = pred_2[,"lwr"], 
+                  ymax = pred_2[,"upr"]),
+              alpha = 0.1,
+              fill = "#3080cf")+
+  xlim(pcl_lims) +
+  labs(y = "% agricultural land, 2016", x = "% Permanent Crop Land of country land area, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA,
+                                    size=0.5))
+
+ggplotly(p_6)
+
+
+
+
+
+```
+
+When the  2015 % permanent cropland, 2015 % forest area, and 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variables are constant (equal to the values in the figure 14 caption), we see that the blue 95% confidence intervals for the 2016 % of agricultural land in a country are wide at the edges of the 2015 % population growth range and show inaccuracy. Whereas the intervals are narrower in the center (between 0% and 3% 2015 population growth) where the majority of the observations are located.  The pink 95% prediction intervals seem to be of almost equal width across the range of the 2015 % population growth spline. The 2015 % population growth natural spline appears to have angular areas in the curve, rather than a smooth flowing curve. Maybe a different spline, or an adjustment to the natural spline can smoothen out the curve. 
+
+
+```{r  spline_dsmodel_1, fig.cap =  "Figure 14. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent annual population growth in 2015, where the forest area percentage of a country's land in 2015 euqals its median = 31.88387, for a median % added value of agriculture, forestry, and fishing to the GDP of a country = 7.408892, and for a median percent of permanent crop land of a country's land area = 1.311853. The blue line is the natural spline, with its associated 95% CI and wider pink 95% PI.", fig.align = "center"}
+
+
+# Get min/max values of pg using the range() function
+pg_lims = filtered %>%
+    select(population_growth_p_2015) %>%
+    range
+
+# Generate a sequence of pg values spanning the range
+pg_grid = seq(from = min(pg_lims), to = max(pg_lims))
+
+
+# Predictions
+pred = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = pg_grid,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="prediction",
+               level=.95)
+
+pred_2 = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = pg_grid,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="confidence",
+               level=.95)
+
+
+p_6 <- ggplot() +
+  geom_point(data = tidy_joined_dataset, aes(x = population_growth_p_2015, y = agricultural_land_p_2016,label = Country ), alpha = 0.4, color = "#23650F") +
+  geom_line(aes(x = pg_grid, y = pred[,"fit"]), color = "#3080cf") +
+  geom_ribbon(aes(x = pg_grid,
+                  ymin = pred[,"lwr"], 
+                  ymax = pred[,"upr"]),
+              alpha = 0.1,
+              fill = "red") +
+  geom_ribbon(aes(x = pg_grid,
+                  ymin = pred_2[,"lwr"], 
+                  ymax = pred_2[,"upr"]),
+              alpha = 0.1,
+              fill = "#3080cf")+
+  xlim(pg_lims) +
+  labs(y = "% agricultural land, 2016", x = "% annual population growth in 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA,
+                                    size=0.5))
+
+ggplotly(p_6)
+
+
+
+
+
+```
+
+When the  2015 % permanent cropland, 2015 % population growth, and 2015 % added value of agriculture, foresting, and fishing to a country’s GDP variables are constant (equal to the values in the figure 15 caption), we see that the blue 95% confidence intervals for the 2016 % of agricultural land in a country are narrow at 0%  forest area in 2015 and get wider after 75%. This shows that there is more accuracy in the area with more points, and less accuracy in the area with less points. The pink 95% prediction intervals seem to be of almost equal width across the range of the % of 2015 forest area.
+
+```{r  spliasdne_model_1, fig.cap =  "Figure 15. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent of forest area, in 2015, for a median percent population growth in a country in 2015 = 1.256186, for a median % added value of agriculture, forestry, and fishing to the GDP of a country = 7.408892, and for a median percent of permanent crop land of a country's land area = 1.311853. The blue line is the natural spline, with its associated 95% CI and wider pink 95% PI.", fig.align = "center"}
+
+
+
+# Get min/max values of fa using the range() function
+fa_lims = filtered %>%
+    select(forest_area_p_2015) %>%
+    range
+
+# Generate a sequence of fa values spanning the range
+fa_grid = seq(from = min(fa_lims), to = max(fa_lims))
+
+
+# Predictions
+pred = predict(first_model, newdata = data.frame(forest_area_p_2015 = fa_grid ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="prediction",
+               level=.95)
+
+pred_2 = predict(first_model, newdata = data.frame(forest_area_p_2015 = fa_grid ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="confidence",
+               level=.95)
+
+
+p_6 <- ggplot() +
+  geom_point(data = tidy_joined_dataset, aes(x = forest_area_p_2015, y = agricultural_land_p_2016,label = Country ), alpha = 0.4, color = "#23650F") +
+  geom_line(aes(x = fa_grid, y = pred[,"fit"]), color = "#3080cf") +
+  geom_ribbon(aes(x = fa_grid,
+                  ymin = pred[,"lwr"], 
+                  ymax = pred[,"upr"]),
+              alpha = 0.1,
+              fill = "red") +
+  geom_ribbon(aes(x = fa_grid,
+                  ymin = pred_2[,"lwr"], 
+                  ymax = pred_2[,"upr"]),
+              alpha = 0.1,
+              fill = "#3080cf")+
+  xlim(fa_lims) +
+  labs(y = "% agricultural land, 2016", x = "% forest area, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA,
+                                    size=0.5))
+
+ggplotly(p_6)
+
+
+
+
+
+```
+
+
+When the  2015 % permanent cropland, 2015 % population growth, and 2015 % forest area variables are constant (equal to the values in the figure 16 caption), we see that the blue 95% confidence intervals for the 2016 % of agricultural land in a country are narrow at 0%  added value of agriculture, foresting, and fishing to a country’s 2015 GDP, and get wider after 20%. This shows that there is more accuracy before 20% added value, and less accuracy after 20% added value. The pink 95% prediction intervals seem to be of almost equal width across the range of the % added value of agriculture, foresting, and fishing to a country’s 2015 GDP.
+
+```{r  spline_xvmodel_1, fig.cap =  "Figure 16. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against the % added value of Agriculture, forestry, and fishing to their GDP in 2015, where the forest area percentage of a country's land in 2015 euqals its median = 31.88387, for a median percent population growth in a country in 2015 = 1.256186, and for a median percent of permanent crop land of a country's land area = 1.311853. The blue line is the natural spline, with its associated 95% CI and wider pink 95% PI.", fig.align = "center"}
+
+
+# Get min/max values of aded_val_GDP_2015 using the range() function
+ag_gdp_lims = filtered %>%
+    select(aded_val_GDP_2015) %>%
+    range
+
+# Generate a sequence of aded_val_GDP_2015 values spanning the range
+ag_gdp_grid = seq(from = min(ag_gdp_lims), to = max(ag_gdp_lims))
+
+
+# Predictions
+pred = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = ag_gdp_grid,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="prediction",
+               level=.95)
+
+pred_2 = predict(first_model, newdata = data.frame(forest_area_p_2015 = 31.88387 ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = ag_gdp_grid,
+                                   perm_cropLand_p_2015 = 1.311853),
+               interval="confidence",
+               level=.95)
+
+
+p_6 <- ggplot() +
+  geom_point(data = tidy_joined_dataset, aes(x = aded_val_GDP_2015, y = agricultural_land_p_2016,label = Country ), alpha = 0.4, color = "#23650F") +
+  geom_line(aes(x = ag_gdp_grid, y = pred[,"fit"]), color = "#3080cf") +
+  geom_ribbon(aes(x = ag_gdp_grid,
+                  ymin = pred[,"lwr"], 
+                  ymax = pred[,"upr"]),
+              alpha = 0.1,
+              fill = "red") +
+  geom_ribbon(aes(x = ag_gdp_grid,
+                  ymin = pred_2[,"lwr"], 
+                  ymax = pred_2[,"upr"]),
+              alpha = 0.1,
+              fill = "#3080cf")+
+  xlim(ag_gdp_lims) +
+  labs(y = "% agricultural land, 2016", x = "% Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black",
+                                    fill=NA,
+                                    size=0.5))
+
+ggplotly(p_6)
+
+
+
+
+
+```
+
+Figures 14, 15, and 16 show some 95% prediction intervals at the edges to contain negative numbers. This is problematic, since a country cannot have a negative percentage of agricultural land. To solve this issue, we could take a log() transformation on the response variable. However, a log transformation on the response variable in the model skewes the residuals of the model and makes the interpretation more complicated than it has to be. Earlier in this study, it was established that the linear regression assumptions were met and that the residual distribution and scatter plot did not show any extreme outliers, so the simple approach was taken to not transform the response variable, and that decision was carried throughout the study.
+
+
+```{r transf_model_PI, include = FALSE}
+
+values = c(10, 25, 50, 75, 90)
+
+PI <- data.frame(predict(first_model, 
+              newdata=data.frame(forest_area_p_2015 = values ,
+                                   population_growth_p_2015 = 1.256186,
+                                   aded_val_GDP_2015 = 7.408892,
+                                   perm_cropLand_p_2015 = 1.311853), 
+              interval="prediction", level=.95))
+PI$fa <- values
+PI <- PI %>%
+  dplyr::select(c(fa, fit, lwr, upr))
+
+colnames(PI) <- c("% Forest Area" , "Point Estimate" , "Lower Limit" , "Upper Limit")
+
+kable(PI,
+    digits = 5,
+    caption = "Table 6. The 95% Prediction intervals for the percente of agricultural land in a country in 2016, where the forest area percentage in 2015 is 10, 25, 50, 75, 90, respectively, for a median percent population growth in a country in 2015 = 1.256186, a median % added value of agriculture, forestry, and fishing to the GDP of a country = 7.408892, and a median percent of permanent crop land of a country's land area = 1.311853.") %>%
+  kable_styling(full_width = F)
+
+```
+
+
+
+
+# IV. Discussion 
+
+## i. Conclusions
+
+Overall, the model is adequate for predicting the % of agricultural land in 2016 for a country, and it explains a good 42.4% of the variability in the % of agricultural land in 2016 for a country. The addition of the 2015 % permanent cropland predictor, when the other splines are in the model, explains a significant amount of variation in the % of agricultural land in 2016 for a country. The 2015 % permanent cropland appears to have a positive correlation with the response variable. Similarly, adding each of the spline for the 2015 % population growth, for the 2015 % forest area, and for the 2015 % added value of agriculture, foresting, and fishing to a country’s GDP explains a significant amount of variation in the % of agricultural land in 2016 for a country, when the other variables (other than the one being added) are already in the model.
+
+The significance of these predictors is not unexpected, since they were chosen for their relationship with the 2016 % of agricultural land, as stated in the introduction. 
+
+
+## ii. Limitations
+
+There were not many options for desirable indicators to choose from. That resulted in a small number of predictors, making dimension reduction techniques such as PCA and clustering unnecessary. Most of the available variables were not specific enough to be related to the goal of the study: to predict the % of agricultural land in a country in 2016.
+ 
+While working with countries as observations, the number of observations would not exceed the 300s or 200s. This greatly limits the flexibility of our model, if we want to avoid overfitting by keeping the model’s degrees of freedom less than $\frac{\text{sample size}}{15}$. Using splines was limiting, since it made the model harder to interpret. However, the interpretability of the model was a good tradeoff for a better predictive model. 
+
+## iii. Further questions
+
+There were some potential extreme outliers in the study, but not enough information is available to validate the accuracy of these outliers (i.e. to check for measurement errors). A sensitivity analysis can be conducted to check for the effect of these outliers on the model. 
+
+The model obtained from this study was not validated nor tested, so this is something that can be done in a future study.
+
+
+***
+
+
+# V. Citations and References {-}

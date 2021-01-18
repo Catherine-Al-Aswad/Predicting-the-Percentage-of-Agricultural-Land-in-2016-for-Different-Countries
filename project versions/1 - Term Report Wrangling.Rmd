@@ -1,0 +1,591 @@
+---
+title: "Predicting the Percent of Agricultural Land in Different Countries"
+author: "Catherine Al Aswad (305541)"
+date: " Last Updated 12/18/2020"
+output:
+  html_document:
+    fig_caption: yes
+    theme: lumen
+    toc: yes
+    toc_depth: 2
+    df_print: kable
+    toc_float:
+      collapsed: no
+---
+
+```{r, include=FALSE}
+# Do not edit this code block/chunk
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning = FALSE, fig.width = 16/2.5, fig.height = 9/2.5)
+```
+
+
+```{r Packages}
+# Load all necessary packages here:
+library(tidyverse) 
+library(janitor)
+library(moderndive)
+library(here)
+library(knitr)
+library(tibbletime)    #to sort a variable of type 'date'
+library(MASS)    #for box-cox
+library(car)    #for vif and qqplot() and 3d graphs
+library(plotly)   # for interactive graphs
+library(olsrr)   # cook's distance
+library(GGally)    # ggpairs()
+library(corrplot)   #fancy correlation matrix
+library(splines)
+library(kableExtra)
+# library(moments)         # for skewness and kurtosis
+
+```
+
+```{r Wrangling}
+# data wrangling code:
+#reading in the code
+agricultural_land_p <- read_csv(here("agricultural land.csv"))
+food_index <- read_csv(here("food index.csv"))
+forest_area_p <- read_csv(here("forest area.csv"))
+
+livestock_index <- read_csv(here("livestock index.csv"))
+population_growth_p <- read_csv(here("population growth.csv"))
+aded_val_GDP <- read_csv(here("ag added value to GDP.csv"))
+
+
+# Agricultural land (% of land area)	
+
+agricultural_land_p_t <- agricultural_land_p %>%
+    dplyr::select(c("Country Name" ,"2016 [YR2016]")) 
+colnames(agricultural_land_p_t) <- c("Country", "agricultural_land_p_2016")
+levels(agricultural_land_p_t$agricultural_land_p_2016)[levels(agricultural_land_p_t$agricultural_land_p_2016)==".."] = NA
+
+agricultural_land_p_t <- agricultural_land_p_t %>%
+   mutate(Country = as.factor(Country),
+          agricultural_land_p_2016 = as.double(agricultural_land_p_2016))       
+
+
+# Food production index (2004-2006 = 100)	
+food_index_t <- food_index %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(food_index_t) <- c("Country", "food_index_2015")
+levels(food_index_t$food_index_2015)[levels(food_index_t$food_index_2015)==".."] = NA
+
+food_index_t <- food_index_t %>%
+   mutate(Country = as.factor(Country),
+          food_index_2015 = as.double(food_index_2015)) 
+
+
+# Forest area (% of land area)	
+forest_area_p_t <- forest_area_p %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(forest_area_p_t) <- c("Country", "forest_area_p_2015")
+levels(forest_area_p_t$forest_area_p_2015)[levels(forest_area_p_t$forest_area_p_2015)==".."] = NA
+
+forest_area_p_t <- forest_area_p_t %>%
+   mutate(Country = as.factor(Country),
+          forest_area_p_2015 = as.double(forest_area_p_2015)) 
+
+
+# Livestock production index (2004-2006 = 100)	
+livestock_index_t <- livestock_index %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(livestock_index_t) <- c("Country", "livestock_index_2015")
+levels(livestock_index_t$livestock_index_2015)[levels(livestock_index_t$livestock_index_2015)==".."] = NA
+
+livestock_index_t <- livestock_index_t%>%
+   mutate(Country = as.factor(Country),
+          livestock_index_2015 = as.double(livestock_index_2015)) 
+
+
+# Population growth (annual %)	
+population_growth_p_t <- population_growth_p %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(population_growth_p_t) <- c("Country", "population_growth_p_2015")
+levels(population_growth_p_t$population_growth_p_2015)[levels(population_growth_p_t$population_growth_p_2015)==".."] = NA
+
+population_growth_p_t <- population_growth_p_t %>%
+   mutate(Country = as.factor(Country),
+          population_growth_p_2015 = as.double(population_growth_p_2015)) 
+
+
+# Agriculture, forestry, and fishing, value added (% of GDP)	
+aded_val_GDP_t <- aded_val_GDP %>%
+    dplyr::select(c("Country Name" ,"2015 [YR2015]")) 
+colnames(aded_val_GDP_t) <- c("Country", "aded_val_GDP_2015")
+levels(aded_val_GDP_t$aded_val_GDP_2015)[levels(aded_val_GDP_t$aded_val_GDP_2015)==".."] = NA
+
+aded_val_GDP_t <- aded_val_GDP_t %>%
+   mutate(Country = as.factor(Country),
+          aded_val_GDP_2015 = as.double(aded_val_GDP_2015)) 
+
+ 
+# tidy final dataset 
+tidy_joined_dataset <-  agricultural_land_p_t %>%
+    inner_join(food_index_t, by = c ("Country")) %>%
+    inner_join(forest_area_p_t, by = c ("Country")) %>%
+    inner_join(livestock_index_t, by = c ("Country")) %>%
+    inner_join(population_growth_p_t, by = c ("Country")) %>%
+    inner_join(aded_val_GDP_t, by = c ("Country"))    %>%
+    na.omit()
+
+
+
+```
+
+
+***
+
+
+# I. Introduction
+
+***
+
+
+```{r sample_table}
+
+
+
+sample <- tidy_joined_dataset %>% 
+  sample_n(5)
+
+sample[,1:4] %>%
+  kable(caption = "Table 1.Sample for 5 randomly chosen countries of the data set used in this study") %>%
+  kable_styling(full_width = F)
+
+
+
+sample[,c(1,5:7)] %>%
+  kable() %>%
+  kable_styling(full_width = F)
+
+
+```
+
+# II. Exploratory data analysis
+
+***
+
+
+```{r summary_table}
+tidy_joined_dataset %>% 
+  summarize(n = n(), 
+            min = min(agricultural_land_p_2016 , na.rm = T), 
+            median = median(agricultural_land_p_2016 , na.rm = T), 
+            mean = mean(agricultural_land_p_2016 , na.rm = T), 
+            max = max(agricultural_land_p_2016 , na.rm = T),
+            sd = sd(agricultural_land_p_2016 , na.rm = T))  %>%
+  kable(caption = "Table 2: Summary for the percent of agricultural land in different countries, in 2016") %>%
+  kable_styling(full_width = F)
+
+```
+
+
+
+```{r   D_CCPTTH, fig.cap = "Figure 1. Distribution for the percent of agricultural land in different countries, in 2016", fig.align = "center"}
+
+ggplot(tidy_joined_dataset,  aes(x= agricultural_land_p_2016)) +
+  geom_histogram(bins = 20, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "% agricultural land in different countries, 2016") +
+    theme_bw()
+
+
+```
+
+
+```{r   D_SI, fig.cap = "Figure 2. Distribution for the 2015 food production index for different countries", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x= food_index_2015)) +
+  geom_histogram(bins = 15, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+    labs(x = "2015 Food Production Index") +
+    theme_bw()
+
+
+```
+
+```{r   SC_SI, fig.cap = "Figure 7.1. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their 2015 food production index. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= food_index_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#ff6600") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "2015 Food Production Index") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESI, fig.cap = "Figure 3. Distribution for the percent of forest area in different countries, in 2015", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x= forest_area_p_2015)) +
+  geom_histogram(bins = 20, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "% forest area in different countries, 2015") +
+    theme_bw()
+
+
+
+```
+
+```{r   SC_SIkl, fig.cap = "Figure 7.1. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent of forest area, in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= forest_area_p_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#ff6600") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% forest area, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESIdx, fig.cap = "Figure 3. Distribution for the Livestock production index in 2015", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x= livestock_index_2015)) +
+  geom_histogram(bins = 25, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "Livestock production index 2015") +
+    theme_bw()
+
+
+
+```
+
+
+```{r   SC_SIvckl, fig.cap = "Figure 7.1. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their livestock production index, in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= livestock_index_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#ff6600") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "Livestock production index, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESIa, fig.cap = "Figure 3. Distribution for the percent annual population growth for different countries in 2015.", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x= population_growth_p_2015)) +
+  geom_histogram(bins = 25, fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "% annual population growth in 2015") +
+    theme_bw()
+
+
+
+```
+
+
+
+```{r   SC_SIzkl, fig.cap = "Figure 7.1. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against their percent annual population growth in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= population_growth_p_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#ff6600") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "% annual population growth in 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+```{r   D_ESIew, fig.cap = "Figure 3. Distribution for the Added value of Agriculture, forestry, and fishing to the GDP of different countries, in 2015", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x= aded_val_GDP_2015)) +
+  geom_histogram(fill = "#f9f906", color = "#6109de", alpha = 0.7) +
+  labs(x = "Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+    theme_bw()
+
+
+
+```
+
+
+
+```{r   SC_SIkfl, fig.cap = "Figure 7.1. Interactive Scatterplot for the percent of agricultural land in different countries, in 2016 against the added value of Agriculture, forestry, and fishing to their GDP in 2015. The red line is the best fit line. The blue curve is the Loess curve.", fig.align = "center"}
+
+
+p1 <- ggplot(tidy_joined_dataset, aes(x= aded_val_GDP_2015, y= agricultural_land_p_2016, label = Country )) +
+  geom_point(alpha = 0.4, color = "#ff6600") +
+  geom_smooth(method = "lm", se = FALSE, size = 0.4, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.4, colour="#3080cf", fill = "#3080cf", alpha = 0.1) +
+  labs(y = "% agricultural land, 2016", x = "Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+  theme(panel.grid.major =  element_line(colour = "#DCDCDC"),
+        panel.grid.minor = element_line(colour = "#DCDCDC"),
+        axis.line = element_line(colour = "black"),
+        panel.background = element_blank(),
+        panel.border = element_rect(colour = "black", 
+                                    fill=NA, 
+                                    size=0.5))
+
+ggplotly(p1)
+
+
+```
+
+
+***
+# III. Multiple linear regression
+
+## i. Methods
+***
+
+
+```{r  primary_model}
+
+first_model = lm(agricultural_land_p_2016 ~ ns(food_index_2015, df = 4) + forest_area_p_2015 + livestock_index_2015 + ns(population_growth_p_2015,df = 4) + ns(aded_val_GDP_2015, df = 4) , data = tidy_joined_dataset)
+
+summary(first_model)
+
+
+
+```
+
+
+```{r qqplots ,fig.cap= "Figure 14. Normal Q-Qplot for the percent of agricultural land in different countries, in 2016", fig.align = "center"}
+
+qqnorm(tidy_joined_dataset$agricultural_land_p_2016, pch = 1, frame = TRUE) 
+qqline(tidy_joined_dataset$agricultural_land_p_2016, col = "#3080cf", lwd = 2)
+
+# # good, between -1 and 1
+# skewness(tidy_joined_dataset$agricultural_land_p_2016)
+# # bad, greater than 1, but transformation did not work
+# kurtosis(tidy_joined_dataset$agricultural_land_p_2016)
+
+
+# # not needed
+# y_model = lm( agricultural_land_p_2016 ~ 1 , data = tidy_joined_dataset)
+# transformation_test = MASS::boxcox(y_model)
+# lambda = transformation_test$x[which(transformation_test$y == max(transformation_test$y))]
+# lambda
+
+```
+
+
+
+```{r rez_dis, fig.cap = "Figure 15. Residuals distribution for the statistical model", fig.align = "center"}
+
+regression_points <-  data.frame(resid(first_model))
+colnames(regression_points) <- "residuals"
+ggplot(regression_points, aes(x = residuals)) +
+  geom_histogram(bins = 20, colour="#ff6600", fill = "#3080cf", alpha = 0.4) +
+  labs(x = "Residuals") +
+  theme_bw()
+
+## not extreme skewness, between -1 and 1
+# skewness(regression_points$residuals)
+
+```
+
+```{r rez_fv, fig.cap = "Figure 16. Residuals graph for the fitted values, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"}
+
+ggplot(tidy_joined_dataset, aes(x = predict(first_model), y = resid(first_model))) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "Residuals", x = "Fitted Values") +
+  theme_bw()
+
+```
+
+
+
+```{r rez_SI, fig.cap = "Figure 17. Residuals graph for the food production Index, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"}
+
+rstandard_val <- rstandard(first_model)
+
+ggplot(tidy_joined_dataset, aes(x = food_index_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "Food Production Index") +
+  theme_bw()
+
+```
+
+```{r rez_EljSI, fig.cap = "Figure 18. Residuals graph for the percent of forest area in different countries, in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"} 
+
+ggplot(tidy_joined_dataset, aes(x = forest_area_p_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% forest area") +
+  theme_bw()
+
+```
+
+```{r rez_EiSI, fig.cap = "Figure 18. Residuals graph for the Livestock production index in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"} 
+
+ggplot(tidy_joined_dataset, aes(x = livestock_index_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "Livestock production index, 2015") +
+  theme_bw()
+
+```
+
+```{r rez_EklSI, fig.cap = "Figure 18. Residuals graph for the percent annual population growth for different countries in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"} 
+
+ggplot(tidy_joined_dataset, aes(x = population_growth_p_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "% annual population growth, 2015") +
+  theme_bw()
+
+```
+
+```{r rez_ESjlI, fig.cap = "Figure 18. Residuals graph for the Added value of Agriculture, forestry, and fishing to the GDP of different countries, in 2015, with a Lowess curve in blue and a horizontal line at zero in red.", fig.align = "center"} 
+
+ggplot(tidy_joined_dataset, aes(x = aded_val_GDP_2015, y = rstandard_val)) +
+  geom_point(shape = 1) +
+  geom_hline(yintercept = 0,  size = 0.5, colour= "red") +
+  geom_smooth(method = "loess", se = TRUE, size = 0.7, colour="#3080cf", alpha = 0.3) +
+  labs(y = "rstandard", x = "Added value of Agriculture, forestry, and fishing to GDP, 2015") +
+  theme_bw()
+
+```
+
+
+
+```{r   model_vifs}
+
+kable(car::vif(first_model),
+      caption = "Table 3: VIF table") %>%
+  kable_styling(full_width = F)
+
+
+```
+
+
+## ii. Model Results and Interpretation
+***
+
+```{r   transf_model_just}
+
+summary(first_model)$call
+
+```
+
+
+```{r   transf_model_summary}
+
+kable(summary(first_model)$coefficients, 
+      digits = 5,
+      caption = "Table 4. Model Summary Table") %>%
+  kable_styling(full_width = F)
+
+
+```
+
+```{r   transf_model_summary_overall}
+
+#Residual Standard error (Like Standard Deviation)
+RSE <- summary(first_model)$sigma #Residual Standard Error
+RSE_df <- summary(first_model)$df[2] #Residual Standard Error df
+MR_2 <- summary(first_model)$r.squared #Multiple R-squared
+AR_2 <- summary(first_model)$adj.r.squared # adjusted R-squared
+FS <- summary(first_model)$fstatistic[1]   # f-statistic
+fs_n <- summary(first_model)$fstatistic[2]   # f-statistic numerator df
+fs_d <- summary(first_model)$fstatistic[3]   # f-statistic denominator df
+fs_p <- pf(summary(first_model)$fstatistic[1],summary(first_model)$fstatistic[2],summary(first_model)$fstatistic[3],lower.tail=FALSE)
+
+new_summary_1 <- data.frame() %>% 
+  rbind(list("Residual Standard Error", RSE, RSE_df),
+      list("Multiple R-squared", MR_2, ""),
+      list("Adjusted R-squared", AR_2, "")) %>%
+kable(format = "html", 
+      digits = 3, 
+      table.attr = "style='width:30%;'", 
+      col.names = c("", "Value", "df"),
+      row.names = FALSE) %>%
+  kable_styling(full_width = F)
+
+
+new_summary_2 <- data.frame() %>% 
+  rbind(list("Model F-statistic", FS, fs_n, fs_d),
+      list("P-value", fs_p, "", "")) %>%
+  mutate_if(is.numeric, funs(as.character(signif(., 4)))) %>%
+kable(format = "html", 
+      digits = 3, 
+      table.attr = "style='width:80%;'",
+      col.names = c("", "Value", "Numerator df", "Denominator df"),
+      row.names = FALSE) %>%
+  kable_styling(full_width = F)
+
+new_summary_1
+new_summary_2
+
+```
+
+***
+## iii. Inference for multiple regression
+
+
+
+```{r   transf_anova_table}
+ kable(anova(first_model), 
+       digits = 4,
+       caption = "Table 5. ANOVA Table") %>%
+  kable_styling(full_width = F)
+
+# anova(first_model)
+
+```
+
+
+
+# IV. Discussion 
+
+## i. Conclusions
+
+
+
+## ii. Limitations
+
+
+## iii. Further questions
+
+
+
+***
+
+
+# V. Citations and References {-}
